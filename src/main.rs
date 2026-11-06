@@ -84,7 +84,7 @@ pub enum TabId {
 #[derive(Clone, Copy, Hash, Eq, PartialEq, PartialOrd, Ord)]
 enum PieceWithColor {
     WhitePawn, WhiteRook, WhiteKnight, WhiteBishop, WhiteQueen, WhiteKing,
-    BlackPawn, BlackRook, BlackKnight, BlackBishop, BlackQueen, BlackKing,
+    BlackPawn, BlackRook, BlackKnight, BlackBishop, BlackQueen, BlackKing, Empty
 }
 
 impl PieceWithColor {
@@ -129,6 +129,7 @@ pub enum Message {
     DownloadProgress(String),
     PuzzleInputIndexChange(String),
     JumpToPuzzle,
+    Tick(std::time::Instant),
 }
 
 struct SoundPlayback {
@@ -195,6 +196,7 @@ fn get_image_handles(theme: &PieceTheme) -> Vec<Handle> {
     handles.insert(PieceWithColor::BlackBishop.index(), Handle::from_path(String::from("pieces/") + theme_str + "/bB.svg"));
     handles.insert(PieceWithColor::BlackQueen.index(), Handle::from_path(String::from("pieces/") + theme_str + "/bQ.svg"));
     handles.insert(PieceWithColor::BlackKing.index(), Handle::from_path(String::from("pieces/") + theme_str + "/bK.svg"));
+    handles.insert(PieceWithColor::Empty.index(), Handle::from_path(String::from("pieces/empty.svg")));
 
     handles
 }
@@ -294,6 +296,9 @@ struct OfflinePuzzles {
     square_ids: HashMap<GenericId, Square>,
     board_btn_ids: Vec<GenericId>,
     piece_imgs: Vec<Handle>,
+
+    show_pieces: bool,
+    blink_start_time: std::time::Instant,
 }
 
 impl Default for OfflinePuzzles {
@@ -348,6 +353,8 @@ impl OfflinePuzzles {
             square_ids: gen_square_hashmap(),
             board_btn_ids: gen_board_button_ids(),
             piece_imgs: get_image_handles(&config::SETTINGS.piece_theme),
+	    show_pieces: true,
+	    blink_start_time: std::time::Instant::now(),
         }
     }
 
@@ -557,7 +564,12 @@ impl OfflinePuzzles {
 
     fn update(&mut self, message: self::Message) -> Task<Message> {
         match (self.from_square, message) {
-            (None, Message::SelectSquare(pos)) => {
+	    (_, Message::Tick(_now)) => {
+		let elapsed = self.blink_start_time.elapsed().as_millis();
+		let cycle_time = elapsed % 600;
+		self.show_pieces = cycle_time < 100;
+		Task::none()
+	    } (None, Message::SelectSquare(pos)) => {
                 let side =
                     match self.game_mode {
                         config::GameMode::Analysis => { self.analysis.side_to_move() }
@@ -889,7 +901,10 @@ impl OfflinePuzzles {
                         event::listen().map(Message::EventOccurred)
                     ])
                 } else {
-                    event::listen().map(Message::EventOccurred)
+		    Subscription::batch(vec![
+	                    event::listen().map(Message::EventOccurred),
+			    iced::time::every(std::time::Duration::from_millis(20)).map(Message::Tick)
+		   ])
                 }
             } _ => {
                 Subscription::batch(vec![
@@ -948,6 +963,7 @@ impl OfflinePuzzles {
                     self.mini_ui,
                     &self.board_btn_ids,
                     &self.piece_imgs,
+		    self.show_pieces,
                 )});
             Container::new(resp)
                 .padding(1)
@@ -1040,6 +1056,7 @@ fn gen_view<'a>(
     mini_ui: bool,
     board_ids: &[GenericId],
     imgs: &[Handle],
+    show_pieces: bool,
 ) -> Element<'a, Message, Theme, iced::Renderer> {
 
     let font = piece_theme == PieceTheme::FontAlpha;
@@ -1191,10 +1208,12 @@ fn gen_view<'a>(
                         }
                     };
 
+		    let piece = if show_pieces { Svg::new(imgs[piece_index].clone()) } else { Svg::new(imgs[PieceWithColor::Empty.index()].clone())  };
+
                     board_row = board_row.push(
                         container(
                             iced_drop::droppable(
-                                Svg::new(imgs[piece_index].clone()).width(board_height)
+                                piece.width(board_height)
                                 .height(board_height)
                             ).drag_hide(true).drag_center(true).on_drop(move |point, rect| Message::DropPiece(pos, point, rect)).on_click(Message::SelectSquare(pos))
                         ).style(container_style).id(board_ids[pos.to_index()].clone())
