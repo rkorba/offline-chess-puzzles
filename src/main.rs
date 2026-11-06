@@ -1,5 +1,9 @@
 #![windows_subsystem = "windows"]
 
+use std::env;
+use std::collections::HashSet;
+use std::time::{Instant};
+use std::io::Write;
 use download_db::download_lichess_db;
 use eval::{Engine, EngineStatus};
 use iced::advanced::widget::Id as GenericId;
@@ -30,7 +34,7 @@ use rand::rng;
 use rand::seq::SliceRandom;
 
 mod config;
-use config::{ONE_PIECE_SOUND_FILE, TWO_PIECES_SOUND_FILE};
+use config::{ONE_PIECE_SOUND_FILE, TWO_PIECES_SOUND_FILE, MISTAKE_SOUND_FILE};
 
 mod styles;
 mod search_tab;
@@ -134,6 +138,7 @@ struct SoundPlayback {
 impl SoundPlayback {
     pub const ONE_PIECE_SOUND: u8 = 0;
     pub const TWO_PIECE_SOUND: u8 = 1;
+    pub const MISTAKE_SOUND: u8 = 2;
     pub fn init_sound() -> Option<Self> {
         let mut sound_playback = None;
         if let Ok(handle) = DeviceSinkBuilder::open_default_sink() {
@@ -151,6 +156,13 @@ impl SoundPlayback {
                     self.handle.mixer(),
                     BufReader::new(
                         StdFile::open(ONE_PIECE_SOUND_FILE).unwrap()
+                    )).unwrap()
+            },
+            SoundPlayback::MISTAKE_SOUND => {
+                rodio::play(
+                    self.handle.mixer(),
+		    BufReader::new(
+                        StdFile::open(MISTAKE_SOUND_FILE).unwrap()
                     )).unwrap()
             },
             _ => {
@@ -253,8 +265,12 @@ struct OfflinePuzzles {
     last_move_to: Option<Square>,
     hint_square: Option<Square>,
     puzzle_status: String,
+    solved_info: String,
     puzzle_number_ui: String,
-
+    correct_ids : HashSet<usize>,
+    wrong_ids : HashSet<usize>,
+    mistake_ids : HashSet<String>,
+    
     analysis: Game,
     analysis_history: Vec<Board>,
     engine_state: EngineStatus,
@@ -270,6 +286,8 @@ struct OfflinePuzzles {
     settings_tab: SettingsTab,
     puzzle_tab: PuzzleTab,
     game_mode: config::GameMode,
+    start_time: std::time::Instant,
+    was_wrong: bool,
     sound_playback: Option<SoundPlayback>,
     lang: lang::Language,
     mini_ui: bool,
@@ -311,13 +329,19 @@ impl OfflinePuzzles {
             downloading_db: false,
             download_progress: String::new(),
             puzzle_status: lang::tr(&config::SETTINGS.lang, "use_search"),
+	    solved_info: String::from("0 / 0"),
             puzzle_number_ui: String::from("1"),
+	    correct_ids: HashSet::new(),
+            wrong_ids: HashSet::new(),
+	    mistake_ids: HashSet::new(),
             search_tab: SearchTab::new(),
             settings_tab: SettingsTab::new(),
             puzzle_tab: PuzzleTab::new(),
             active_tab: TabId::Search,
 
             game_mode: config::GameMode::Puzzle,
+	    start_time: std::time::Instant::now(),
+	    was_wrong: false,
             sound_playback: SoundPlayback::init_sound(),
             lang: config::SETTINGS.lang,
             mini_ui: false,
@@ -367,7 +391,7 @@ impl OfflinePuzzles {
                 }
             }
         } else if !self.puzzle_tab.puzzles.is_empty() {
-            let movement;
+            let mut legalmove = false;
             let move_made_notation =
                 get_notation_string(self.board, self.search_tab.piece_to_promote_to, from, to);
 
@@ -384,7 +408,7 @@ impl OfflinePuzzles {
 
             // If the move is correct we can apply it to the board
             if is_mate || (move_made == correct_move) {
-
+		legalmove = true;
                 self.board = self.board.make_move_new(move_made);
                 self.analysis_history.push(self.board);
 
@@ -395,6 +419,14 @@ impl OfflinePuzzles {
                         && let Some(audio) = &self.sound_playback {
                             audio.play_audio(SoundPlayback::ONE_PIECE_SOUND);
                     }
+		    if !self.wrong_ids.contains(&self.puzzle_tab.current_puzzle) {
+		    	self.correct_ids.insert(self.puzzle_tab.current_puzzle);
+		    }
+		    let mut file = std::fs::OpenOptions::new().create(true).append(true).open(format!("{}/puzzles.txt", env::var("HOME").unwrap())).expect("Failed to open file");
+		    let duration = Instant::now()-self.start_time;
+		    let oline = format!("{}\t{}\t{}\n", self.was_wrong, duration.as_millis(), self.puzzle_tab.current_puzzle_fen);
+		    file.write_all(oline.as_bytes()).expect("Failed to append to the file");
+
                     if self.puzzle_tab.current_puzzle < self.puzzle_tab.puzzles.len() - 1 {
                         if self.settings_tab.saved_configs.auto_load_next {
                             self.load_puzzle(true);
@@ -422,7 +454,7 @@ impl OfflinePuzzles {
                         && let Some(audio) = &self.sound_playback {
                             audio.play_audio(SoundPlayback::TWO_PIECE_SOUND);
                     }
-                    movement = ChessMove::new(
+                    let movement = ChessMove::new(
                         Square::from_str(&String::from(&correct_moves[self.puzzle_tab.current_puzzle_move][..2])).unwrap(),
                         Square::from_str(&String::from(&correct_moves[self.puzzle_tab.current_puzzle_move][2..4])).unwrap(), PuzzleTab::check_promotion(correct_moves[self.puzzle_tab.current_puzzle_move]));
 
@@ -436,17 +468,39 @@ impl OfflinePuzzles {
                     self.puzzle_status = lang::tr(&self.lang, "correct_move");
                 }
             } else {
-                #[allow(clippy::collapsible_else_if)]
-                if self.board.side_to_move() == Color::White {
-                    self.puzzle_status = lang::tr(&self.lang, "wrong_move_white_play");
-                } else {
-                    self.puzzle_status = lang::tr(&self.lang, "wrong_move_black_play");
-                }
+		if self.board.legal(move_made) {
+			legalmove = true;
+			self.was_wrong = true;
+			self.mistake_ids.insert(format!("{}_{}_{}", self.puzzle_tab.current_puzzle.to_string(), self.puzzle_tab.current_puzzle_move.to_string(), move_made_notation));
+			if !self.correct_ids.contains(&self.puzzle_tab.current_puzzle) {
+                        	self.wrong_ids.insert(self.puzzle_tab.current_puzzle);
+                    	}
+
+        	        #[allow(clippy::collapsible_else_if)]
+                	if self.board.side_to_move() == Color::White {
+	                    self.puzzle_status = lang::tr(&self.lang, "wrong_move_white_play");
+        	        } else {
+	                    self.puzzle_status = lang::tr(&self.lang, "wrong_move_black_play");
+        	        }
+			if let Some(audio) = &self.sound_playback {
+                        	audio.play_audio(SoundPlayback::MISTAKE_SOUND);
+			}
+		}
             }
+	    if legalmove {
+	            self.solved_info = String::from("   ");
+		    self.solved_info.push_str(&(self.correct_ids.len()).to_string());
+		    self.solved_info.push_str(" / ");
+        	    self.solved_info.push_str(&(self.correct_ids.len()+self.wrong_ids.len()).to_string());
+		    self.solved_info.push_str("  Points: ");
+   		    self.solved_info.push_str(&(self.correct_ids.len() as i32 - self.mistake_ids.len() as i32).to_string());
+	    }
         }
     }
 
     fn load_puzzle(&mut self, inc_counter: bool) {
+        self.start_time = Instant::now();
+	self.was_wrong = false;
         self.hint_square = None;
         self.puzzle_tab.current_puzzle_move = 1;
         if inc_counter {
@@ -869,6 +923,7 @@ impl OfflinePuzzles {
                     self.hint_square,
                     self.settings_tab.saved_configs.piece_theme,
                     &self.puzzle_status,
+		    &self.solved_info,
                     is_fav,
                     has_more_puzzles,
                     has_previous,
@@ -960,6 +1015,7 @@ fn gen_view<'a>(
     hint_square: Option<Square>,
     piece_theme: styles::PieceTheme,
     puzzle_status: &'a str,
+    solved_info: &'a str,
     is_fav: bool,
     has_more_puzzles: bool,
     has_previous: bool,
@@ -996,14 +1052,14 @@ fn gen_view<'a>(
     let board_height =
         if engine_eval.is_empty() {
             if show_coordinates {
-                (size.height - 145.) / 8.
+                (size.height - 155.) / 8.
             } else {
-                (size.height - 135.) / 8.
+                (size.height - 155.) / 8.
             }
         } else if show_coordinates {
-            (size.height - 175.) / 8.
+            (size.height - 185.) / 8.
         } else {
-            (size.height - 165.) / 8.
+            (size.height - 175.) / 8.
         };
 
     let ranks;
@@ -1263,7 +1319,7 @@ fn gen_view<'a>(
         btn_go
     ].spacing(10).align_y(Alignment::Center);
 
-    board_col = board_col.push(Text::new(puzzle_status)).push(game_mode_row).push(navigation_row).push(pagination_row);
+    board_col = board_col.push(Text::new(solved_info)).push(Text::new(puzzle_status)).push(game_mode_row).push(navigation_row).push(pagination_row);
     if !engine_eval.is_empty() {
         board_col = board_col.push(
             row![

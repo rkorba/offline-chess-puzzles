@@ -21,6 +21,7 @@ pub const PIECES_DIRECTORY: &str = "pieces/";
 pub const SETTINGS_FILE: &str = "settings.json";
 pub const ONE_PIECE_SOUND_FILE: &str = "1piece.ogg";
 pub const TWO_PIECES_SOUND_FILE: &str = "2pieces.ogg";
+pub const MISTAKE_SOUND_FILE: &str = "mistake.ogg";
 pub const DATABASE_URL: &str = "ocp.db";
 
 // Iced widget IDs need to be static
@@ -72,7 +73,7 @@ impl ::std::default::Default for OfflinePuzzlesConfig {
             engine_path: None,
             engine_limit: String::from("depth 40"),
             window_width: 1010.,
-            window_height: 680.,
+            window_height: 380.,
             maximized: false,
             puzzle_db_location: String::from(PUZZLES_DIRECTORY) + "lichess_db_puzzle.csv",
             piece_theme: styles::PieceTheme::Cburnett,
