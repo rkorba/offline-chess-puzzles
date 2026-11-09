@@ -64,6 +64,8 @@ extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 
+const BLINK_SHOW_TIME: u128 = 200;
+const BLINK_HIDE_TIME: u128 = 500;
 const HEADER_SIZE: f32 = 32.0;
 const TAB_PADDING: u16 = 16;
 const LICHESS_DB_URL: &str = "https://database.lichess.org/lichess_db_puzzle.csv.zst";
@@ -142,7 +144,8 @@ impl SoundPlayback {
     pub const MISTAKE_SOUND: u8 = 2;
     pub fn init_sound() -> Option<Self> {
         let mut sound_playback = None;
-        if let Ok(handle) = DeviceSinkBuilder::open_default_sink() {
+        if let Ok(mut handle) = DeviceSinkBuilder::open_default_sink() {
+	    handle.log_on_drop(false);
             sound_playback = Some (
                 SoundPlayback {
                     handle,
@@ -539,6 +542,8 @@ impl OfflinePuzzles {
         self.puzzle_tab.current_puzzle_fen = san_correct_ep(self.board.to_string());
         self.puzzle_tab.game_status = GameStatus::Playing;
         self.game_mode = config::GameMode::Puzzle;
+
+        self.blink_start_time = std::time::Instant::now();
     }
 
     fn inc_puzzle_counter(&mut self) {
@@ -565,9 +570,9 @@ impl OfflinePuzzles {
     fn update(&mut self, message: self::Message) -> Task<Message> {
         match (self.from_square, message) {
 	    (_, Message::Tick(_now)) => {
-		let elapsed = self.blink_start_time.elapsed().as_millis();
-		let cycle_time = elapsed % 600;
-		self.show_pieces = cycle_time < 100;
+		let elapsed = self.blink_start_time.elapsed().as_millis() + BLINK_SHOW_TIME + BLINK_HIDE_TIME/2;
+		let cycle_time = elapsed % (BLINK_HIDE_TIME+BLINK_SHOW_TIME);
+		self.show_pieces = cycle_time < BLINK_SHOW_TIME;
 		Task::none()
 	    } (None, Message::SelectSquare(pos)) => {
                 let side =
