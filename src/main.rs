@@ -66,6 +66,7 @@ extern crate serde_derive;
 
 const BLINK_SHOW_TIME: u128 = 200;
 const BLINK_HIDE_TIME: u128 = 500;
+const BLINK_DELAY_TIME: u128 = 100;
 const HEADER_SIZE: f32 = 32.0;
 const TAB_PADDING: u16 = 16;
 const LICHESS_DB_URL: &str = "https://database.lichess.org/lichess_db_puzzle.csv.zst";
@@ -577,7 +578,7 @@ impl OfflinePuzzles {
     fn update(&mut self, message: self::Message) -> Task<Message> {
         match (self.from_square, message) {
 	    (_, Message::Tick(_now)) => {
-		let elapsed = self.blink_start_time.elapsed().as_millis() + BLINK_SHOW_TIME + BLINK_HIDE_TIME/2;
+		let elapsed = self.blink_start_time.elapsed().as_millis() + BLINK_SHOW_TIME + BLINK_HIDE_TIME - BLINK_DELAY_TIME;
 		let cycle_time = elapsed % (BLINK_HIDE_TIME+BLINK_SHOW_TIME);
 		self.show_pieces = cycle_time < BLINK_SHOW_TIME;
 		Task::none()
