@@ -34,7 +34,7 @@ use rand::rng;
 use rand::seq::SliceRandom;
 
 mod config;
-use config::{ONE_PIECE_SOUND_FILE, TWO_PIECES_SOUND_FILE, MISTAKE_SOUND_FILE};
+use config::{ONE_PIECE_SOUND_FILE, TWO_PIECES_SOUND_FILE, MISTAKE_SOUND_FILE, SUCCESS_SOUND_FILE};
 
 mod styles;
 mod search_tab;
@@ -139,9 +139,11 @@ impl SoundPlayback {
     pub const ONE_PIECE_SOUND: u8 = 0;
     pub const TWO_PIECE_SOUND: u8 = 1;
     pub const MISTAKE_SOUND: u8 = 2;
+    pub const SUCCESS_SOUND: u8 = 3;
     pub fn init_sound() -> Option<Self> {
         let mut sound_playback = None;
-        if let Ok(handle) = DeviceSinkBuilder::open_default_sink() {
+        if let Ok(mut handle) = DeviceSinkBuilder::open_default_sink() {
+	    handle.log_on_drop(false);
             sound_playback = Some (
                 SoundPlayback {
                     handle,
@@ -163,6 +165,13 @@ impl SoundPlayback {
                     self.handle.mixer(),
 		    BufReader::new(
                         StdFile::open(MISTAKE_SOUND_FILE).unwrap()
+                    )).unwrap()
+            },
+            SoundPlayback::SUCCESS_SOUND => {
+                rodio::play(
+                    self.handle.mixer(),
+                    BufReader::new(
+                        StdFile::open(SUCCESS_SOUND_FILE).unwrap()
                     )).unwrap()
             },
             _ => {
@@ -417,7 +426,7 @@ impl OfflinePuzzles {
                 if self.puzzle_tab.current_puzzle_move == correct_moves.len() {
                     if self.settings_tab.saved_configs.play_sound
                         && let Some(audio) = &self.sound_playback {
-                            audio.play_audio(SoundPlayback::ONE_PIECE_SOUND);
+                            audio.play_audio(SoundPlayback::SUCCESS_SOUND);
                     }
 		    if !self.wrong_ids.contains(&self.puzzle_tab.current_puzzle) {
 		    	self.correct_ids.insert(self.puzzle_tab.current_puzzle);
