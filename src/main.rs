@@ -441,8 +441,7 @@ impl OfflinePuzzles {
 		    	self.correct_ids.insert(self.puzzle_tab.current_puzzle);
 		    }
 		    let mut file = std::fs::OpenOptions::new().create(true).append(true).open(format!("{}/puzzles.txt", env::var("HOME").unwrap())).expect("Failed to open file");
-		    let duration = Instant::now()-self.start_time;
-		    let oline = format!("{}\t{}\t{}\n", self.was_wrong, duration.as_millis(), self.puzzle_tab.current_puzzle_fen);
+		    let oline = format!("{}\t{}\t{}\n", self.was_wrong, self.start_time.elapsed().as_millis(), self.puzzle_tab.current_puzzle_fen);
 		    file.write_all(oline.as_bytes()).expect("Failed to append to the file");
 
                     if self.puzzle_tab.current_puzzle < self.puzzle_tab.puzzles.len() - 1 {
@@ -517,7 +516,6 @@ impl OfflinePuzzles {
     }
 
     fn load_puzzle(&mut self, inc_counter: bool) {
-        self.start_time = Instant::now();
 	self.was_wrong = false;
         self.hint_square = None;
         self.puzzle_tab.current_puzzle_move = 1;
@@ -551,7 +549,8 @@ impl OfflinePuzzles {
         self.puzzle_tab.game_status = GameStatus::Playing;
         self.game_mode = config::GameMode::Puzzle;
 
-        self.blink_start_time = std::time::Instant::now();
+        self.blink_start_time = Instant::now();
+	self.start_time = Instant::now();
     }
 
     fn inc_puzzle_counter(&mut self) {
